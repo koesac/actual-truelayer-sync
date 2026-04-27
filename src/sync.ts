@@ -4,6 +4,9 @@ import { loadConfig, writeConfig } from './config'
 import { initActual, importTransactions, shutdownActual } from './actual'
 import { refreshToken, listAccounts, listCards, getAccountTransactions, getCardTransactions } from './truelayer'
 import { transformTransactions } from './transform'
+import { computeFromDate } from './utils/date'
+import { resolveIsCard } from './utils/account'
+import { buildImportSummary } from './utils/logging'
 import type { Connection, Config } from './config'
 import type { TrueLayerAccount, TrueLayerCard } from './types'
 
@@ -57,15 +60,10 @@ async function syncConnection(connection: Connection, config: Config): Promise<v
       const prefix = `[${connection.name}][${configAccount.friendlyName}]`
 
       // Compute from date: lastSyncDate minus 14-day overlap, or undefined for first run
-      let fromDate: string | undefined
-      if (configAccount.lastSyncDate) {
-        const d = new Date(configAccount.lastSyncDate)
-        d.setDate(d.getDate() - 14)
-        fromDate = d.toISOString().slice(0, 10)
-      }
+      const fromDate = configAccount.lastSyncDate ? computeFromDate(configAccount.lastSyncDate) : undefined
 
       console.log(`${prefix} Fetching transactions${fromDate ? ` since ${fromDate}` : ''}...`)
-      const isCard = configAccount.isCard ?? connection.isCard ?? false
+      const isCard = resolveIsCard(configAccount, connection)
       const trueLayerTransactions = isCard
         ? await getCardTransactions(access_token, configAccount.trueLayerId, fromDate)
         : await getAccountTransactions(access_token, configAccount.trueLayerId, fromDate)
@@ -87,17 +85,7 @@ async function syncConnection(connection: Connection, config: Config): Promise<v
         const added = result.added.length
         const updated = result.updated.length
         configAccount.lastSyncDate = new Date().toISOString().slice(0, 10)
-        let summary: string
-        if (added > 0 && updated > 0) {
-          summary = `Added ${added} and updated ${updated} transaction${updated === 1 ? '' : 's'}`
-        } else if (added > 0) {
-          summary = `Added ${added} transaction${added === 1 ? '' : 's'}`
-        } else if (updated > 0) {
-          summary = `Updated ${updated} transaction${updated === 1 ? '' : 's'}`
-        } else {
-          summary = 'No new transactions to import'
-        }
-        console.log(`${prefix} └ ${summary} (${from} → ${to}).`)
+        console.log(`${prefix} └ ${buildImportSummary(added, updated)} (${from} → ${to}).`)
       } else {
         console.log(`${prefix} └ No transactions.`)
       }
