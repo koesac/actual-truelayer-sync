@@ -36,7 +36,7 @@
     // @actual-app/core's raw .ts source files
     "baseUrl": ".",
     "paths": {
-      "@actual-app/api": ["src/actual-api.ts"]
+      "@actual-app/api": ["src/lib/actual-api.ts"]
     }
   },
   "include": ["src"],
