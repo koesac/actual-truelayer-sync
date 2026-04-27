@@ -117,6 +117,28 @@ describe('FileConfigSchema', () => {
   it('rejects missing connections', () => {
     expect(FileConfigSchema.safeParse({}).success).toBe(false)
   })
+
+  it('rejects duplicate connection names', () => {
+    const result = FileConfigSchema.safeParse({
+      ...validFileConfig,
+      connections: [
+        { name: 'My Bank', refreshToken: 'token-1', accounts: [] },
+        { name: 'My Bank', refreshToken: 'token-2', accounts: [] },
+      ],
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts connections with unique names', () => {
+    const result = FileConfigSchema.safeParse({
+      ...validFileConfig,
+      connections: [
+        { name: 'My Bank', refreshToken: 'token-1', accounts: [] },
+        { name: 'My Credit Card', refreshToken: 'token-2', accounts: [] },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('EnvSchema', () => {

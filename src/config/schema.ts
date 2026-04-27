@@ -17,12 +17,17 @@ export const ConnectionSchema = z.object({
   accounts: z.array(AccountSchema),
 })
 
-export const FileConfigSchema = z.object({
+export const FileConfigSchema = z
+  .object({
     version: z.number().int(),
-  includeCategoryInNotes: z.boolean().default(false),
-  lookbackDays: z.number().int().positive().default(14),
-  connections: z.array(ConnectionSchema).min(1),
-})
+    includeCategoryInNotes: z.boolean().default(false),
+    lookbackDays: z.number().int().positive().default(14),
+    connections: z.array(ConnectionSchema).min(1),
+  })
+  .refine((data) => new Set(data.connections.map((c) => c.name)).size === data.connections.length, {
+    message: 'Connection names must be unique',
+    path: ['connections'],
+  })
 
 export const EnvSchema = z.object({
   TRUELAYER_CLIENT_ID: z.string().min(1),
