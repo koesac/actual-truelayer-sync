@@ -7,7 +7,7 @@ vi.mock('./accounts')
 vi.mock('./account')
 vi.mock('axios')
 
-import * as truelayer from '../truelayer'
+import * as truelayer from '../truelayer/truelayer'
 import * as accounts from './accounts'
 import * as account from './account'
 import axios from 'axios'

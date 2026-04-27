@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { syncAccount } from './account'
 import type { Account, Connection } from '../config/schema'
-import type { TrueLayerAccount, TrueLayerCard, TrueLayerTransaction } from '../types'
+import type { TrueLayerAccount, TrueLayerCard, TrueLayerTransaction } from '../truelayer/types'
 
 vi.mock('../actual')
 vi.mock('../truelayer')
 
 import * as actual from '../actual/actual'
-import * as truelayer from '../truelayer'
+import * as truelayer from '../truelayer/truelayer'
 
 const baseConnection: Connection = {
   name: 'My Bank',

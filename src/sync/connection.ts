@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { refreshToken } from '../truelayer'
+import { refreshToken } from '../truelayer/truelayer'
 import { syncAccount } from './account'
 import { fetchAccountMap } from './accounts'
 import type { Connection, Config } from '../config/schema'

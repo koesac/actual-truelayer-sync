@@ -1,11 +1,11 @@
 import { importTransactions } from '../actual/actual'
-import { getAccountTransactions, getCardTransactions } from '../truelayer'
+import { getAccountTransactions, getCardTransactions } from '../truelayer/truelayer'
 import { transformTransactions } from '../transform'
 import { computeFromDate } from '../utils/date'
 import { resolveIsCard } from '../utils/account'
 import { buildImportSummary } from '../utils/logging'
 import type { Account, Connection } from '../config/schema'
-import type { TrueLayerAccount, TrueLayerCard } from '../types'
+import type { TrueLayerAccount, TrueLayerCard } from '../truelayer/types'
 
 export async function syncAccount(
   configAccount: Account,

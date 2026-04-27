@@ -1,4 +1,4 @@
-import type { TrueLayerTransaction, TrueLayerAccount, TrueLayerCard } from './types'
+import type { TrueLayerTransaction, TrueLayerAccount, TrueLayerCard } from './truelayer/types'
 
 import { Account } from './config/schema'
 
