@@ -5,7 +5,7 @@ import cron from 'node-cron'
 
 const CONFIG_PATH = path.join(__dirname, '..', 'data', 'config.json')
 
-const AccountSchema = z.object({
+export const AccountSchema = z.object({
   trueLayerId: z.string().min(1),
   actualId: z.string().min(1),
   friendlyName: z.string().min(1),
@@ -14,19 +14,19 @@ const AccountSchema = z.object({
   lastSyncDate: z.string().date().optional(),
 })
 
-const ConnectionSchema = z.object({
+export const ConnectionSchema = z.object({
   name: z.string().min(1),
   refreshToken: z.string().min(1),
   isCard: z.boolean().optional(),
   accounts: z.array(AccountSchema),
 })
 
-const FileConfigSchema = z.object({
+export const FileConfigSchema = z.object({
   includeCategoryInNotes: z.boolean().default(false),
   connections: z.array(ConnectionSchema).min(1),
 })
 
-const EnvSchema = z.object({
+export const EnvSchema = z.object({
   TRUELAYER_CLIENT_ID: z.string().min(1),
   TRUELAYER_CLIENT_SECRET: z.string().min(1),
   ACTUAL_SERVER_URL: z.string().url(),

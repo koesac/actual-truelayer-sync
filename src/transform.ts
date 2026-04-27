@@ -28,7 +28,8 @@ export function shouldFlipAmount(
 }
 
 export function toActualAmount(amount: number, shouldFlip: boolean): number {
-  return Math.round(amount * 100) * (shouldFlip ? -1 : 1)
+  const pence = Math.round(amount * 100)
+  return pence === 0 ? 0 : pence * (shouldFlip ? -1 : 1)
 }
 
 export function transformTransaction(

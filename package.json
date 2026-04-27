@@ -7,7 +7,8 @@
     "build": "tsc --project tsconfig.build.json",
     "start": "node dist/sync.js",
     "dev": "tsx --env-file=.env src/sync.ts",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "check:types": "tsc --project tsconfig.build.json --noEmit",
     "docker:build": "docker build -t actual-truelayer-sync .",
     "docker:run": "docker run --rm --env-file=.env -v ./data:/app/data actual-truelayer-sync"
@@ -27,6 +28,7 @@
     "@types/node": "25.6.0",
     "prettier": "3.8.3",
     "tsx": "4.21.0",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^4.1.5"
   }
 }
