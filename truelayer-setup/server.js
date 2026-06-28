@@ -83,6 +83,150 @@ function uniqueConnName(base, existingConnections) {
   return `${base}-${i}`;
 }
 
+/** Build the account mapping table rows.
+ *  savedAccounts  — conn.accounts from config.json (always available)
+ *  liveAccounts   — results from TrueLayer API (may be null if not fetched yet)
+ *
+ *  Strategy: start from liveAccounts when present; fall back to savedAccounts
+ *  only. Rows from config that are no longer in the live list are shown greyed
+ *  out so the user knows they may be stale.
+ */
+function buildRows(savedAccounts, liveAccounts) {
+  if (liveAccounts) {
+    // Merge: live list is authoritative for TrueLayer IDs; saved data fills in mapped values
+    const rows = liveAccounts.map(acc => {
+      const saved = savedAccounts.find(a => a.trueLayerId === acc.account_id);
+      const defaultName = acc.display_name || acc.account_type || '';
+      return {
+        trueLayerId: acc.account_id,
+        displayName: defaultName,
+        actualId: saved ? saved.actualId : '',
+        friendlyName: saved ? saved.friendlyName : defaultName,
+        flip: saved ? !!saved.flip : false,
+        stale: false,
+      };
+    });
+    // Append any saved rows whose TrueLayer ID is no longer in the live list
+    savedAccounts.forEach(saved => {
+      if (!liveAccounts.find(a => a.account_id === saved.trueLayerId)) {
+        rows.push({
+          trueLayerId: saved.trueLayerId,
+          displayName: saved.friendlyName || saved.trueLayerId,
+          actualId: saved.actualId,
+          friendlyName: saved.friendlyName,
+          flip: !!saved.flip,
+          stale: true,
+        });
+      }
+    });
+    return rows;
+  }
+
+  // No live data — render from saved config only
+  if (savedAccounts.length === 0) return [];
+  return savedAccounts.map(saved => ({
+    trueLayerId: saved.trueLayerId,
+    displayName: saved.friendlyName || saved.trueLayerId,
+    actualId: saved.actualId,
+    friendlyName: saved.friendlyName,
+    flip: !!saved.flip,
+    stale: false,
+  }));
+}
+
+function renderMappingPage(name, conn, rows, notice) {
+  const allIds = rows.map(r => r.trueLayerId).join(',');
+  const tableRows = rows.map(r => `<tr${r.stale ? ' style="opacity:0.5"' : ''}>
+      <td>${r.displayName}${r.stale ? ' <span style="font-size:0.8em;color:#c5221f">(not in live list)</span>' : ''}</td>
+      <td><code style="font-size:0.8em">${r.trueLayerId}</code></td>
+      <td><input name="actualId_${r.trueLayerId}" value="${r.actualId}" placeholder="Paste Actual account ID"></td>
+      <td><input name="friendlyName_${r.trueLayerId}" value="${r.friendlyName}" placeholder="e.g. Main Current Account"></td>
+      <td style="text-align:center"><input type="checkbox" name="flip_${r.trueLayerId}" ${r.flip ? 'checked' : ''}></td>
+    </tr>`).join('');
+
+  const emptyState = rows.length === 0
+    ? `<tr><td colspan="5" style="text-align:center;padding:24px;color:#888">
+        No accounts yet &mdash; click <strong>Sync from bank</strong> above to discover accounts from TrueLayer.
+      </td></tr>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>Map Accounts - ${name}</title>
+  <style>
+    body { font-family: system-ui; max-width: 1000px; margin: 40px auto; padding: 0 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border: 1px solid #ddd; text-align: left; vertical-align: middle; }
+    th { background: #f0f0f0; font-size: 0.85em; }
+    input[type=text], input:not([type]) { width: 100%; padding: 6px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; }
+    .btn-save { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 16px; }
+    .btn-sync { display: inline-block; padding: 8px 16px; background: #444; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em; margin-bottom: 16px; }
+    .btn-sync:hover { background: #222; }
+    a { color: #0066cc; }
+    code { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; }
+    .hint { font-size: 0.85em; color: #555; margin-bottom: 16px; background: #f0f4ff; border-left: 4px solid #1a73e8; padding: 10px 14px; border-radius: 0 4px 4px 0; line-height: 1.7; }
+    .notice { padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 0.9em; }
+    .notice.success { background: #e6f4ea; border-left: 4px solid #137333; color: #137333; }
+    .notice.error   { background: #fce8e6; border-left: 4px solid #c5221f; color: #c5221f; }
+    .notice.info    { background: #fef7e0; border-left: 4px solid #f9ab00; color: #7a5c00; }
+    .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 10px 14px; border-radius: 4px; margin-top: 12px; font-size: 0.9em; display: none; }
+    .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <h1>&#128194; Map Accounts &mdash; ${name}</h1>
+
+  ${notice ? `<div class="notice ${notice.type}">${notice.message}</div>` : ''}
+
+  <div class="hint">
+    <strong>How to find your Actual Budget account ID:</strong><br>
+    Run the sync container once with <code>--dry-run</code> to list available account IDs:<br>
+    <code>docker compose run --rm truelayer-sync --dry-run</code><br>
+    Or open Actual Budget &rarr; Settings &rarr; Advanced &rarr; copy the ID next to the account.<br>
+    <br>
+    <strong>Friendly Name</strong> is used in sync logs only.<br>
+    <strong>Flip</strong> inverts transaction amounts &mdash; useful if your bank reports credits as negative.
+  </div>
+
+  <div class="toolbar">
+    <a class="btn-sync" href="/accounts/${encodeURIComponent(name)}/refresh">&#8635; Sync from bank</a>
+    <span style="font-size:0.85em;color:#888">Fetches the latest account list from TrueLayer and merges with your saved mappings.</span>
+  </div>
+
+  <form action="/save-mapping/${encodeURIComponent(name)}" method="POST" onsubmit="return validateForm(event)">
+    <table>
+      <tr>
+        <th>Bank Account</th>
+        <th>TrueLayer ID</th>
+        <th>Actual Budget Account ID</th>
+        <th>Friendly Name</th>
+        <th>Flip</th>
+      </tr>
+      ${tableRows}
+      ${emptyState}
+    </table>
+    <div class="warn" id="warn">&#9888;&#65039; No accounts have an Actual Budget ID filled in. At least one is required to save &mdash; otherwise the sync container will crash on startup.</div>
+    <input type="hidden" name="allIds" value="${allIds}">
+    ${rows.length > 0 ? '<button class="btn-save" type="submit">&#128190; Save Mappings</button>' : ''}
+  </form>
+  <script>
+    function validateForm(e) {
+      const ids = document.querySelectorAll('input[name^="actualId_"]');
+      const any = Array.from(ids).some(i => i.value.trim());
+      if (!any) {
+        e.preventDefault();
+        document.getElementById('warn').style.display = 'block';
+        return false;
+      }
+      return true;
+    }
+  </script>
+  <br><a href="/">&larr; Back</a>
+</body>
+</html>`;
+}
+
 // ── Home ──────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   const config = loadConfig();
@@ -115,7 +259,6 @@ app.get('/', (req, res) => {
     table.env { width: 100%; border-collapse: collapse; margin-top: 4px; }
     table.env td { padding: 4px 8px; }
     table.env td:first-child { font-weight: 600; width: 150px; color: #555; }
-    /* Confirmation dialog */
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:100; align-items:center; justify-content:center; }
     .modal-overlay.open { display:flex; }
     .modal { background:#fff; border-radius:8px; padding:24px 28px; max-width:380px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.18); }
@@ -148,7 +291,7 @@ app.get('/', (req, res) => {
 
   <div class="card">
     <h2>Add Bank Connection</h2>
-    <p>You\'ll be redirected to TrueLayer to choose and authorise your bank. The connection name is set automatically from the bank\'s display name &mdash; if you already have a connection with the same name, a suffix is added (e.g. <em>Monzo-2</em>).</p>
+    <p>You'll be redirected to TrueLayer to choose and authorise your bank. The connection name is set automatically from the bank's display name &mdash; if you already have a connection with the same name, a suffix is added (e.g. <em>Monzo-2</em>).</p>
     <form action="/start-auth" method="POST">
       <label>Account Type</label>
       <select name="isCard">
@@ -168,10 +311,12 @@ app.get('/', (req, res) => {
       <span class="tag" style="background:${hasToken ? '#e6f4ea' : '#fce8e6'};color:${hasToken ? '#137333' : '#c5221f'}">
         ${hasToken ? '&#9989; Authorised' : '&#9888;&#65039; No token'}
       </span>
+      <span class="tag">${c.accounts.length} account${c.accounts.length !== 1 ? 's' : ''} mapped</span>
       <br><br>
-      ${hasToken
-        ? `<a class="btn" href="/accounts/${encodeURIComponent(c.name)}">View / Map Accounts</a>`
-        : `<a class="btn" style="background:#0066cc" href="/reauth/${encodeURIComponent(c.name)}">&#128274; Re-authorise</a>`
+      <a class="btn" href="/accounts/${encodeURIComponent(c.name)}">View / Map Accounts</a>
+      ${!hasToken
+        ? `<a class="btn" style="background:#0066cc" href="/reauth/${encodeURIComponent(c.name)}">&#128274; Re-authorise</a>`
+        : ''
       }
       <button class="btn" style="background:#c5221f;color:white;font-size:0.9em" onclick="confirmDelete('${c.name.replace(/'/g, "\\'")}')">Remove</button>
     </div>`;
@@ -198,7 +343,6 @@ app.get('/', (req, res) => {
     function closeModal() {
       document.getElementById('deleteModal').classList.remove('open');
     }
-    // Close on backdrop click
     document.getElementById('deleteModal').addEventListener('click', function(e) {
       if (e.target === this) closeModal();
     });
@@ -232,8 +376,6 @@ app.post('/start-auth', (req, res) => {
 });
 
 // ── Re-authorise existing connection ─────────────────────────────────────────
-// Sends the user through OAuth again but tags the state with the existing
-// connection name so the callback can restore the token without touching config.
 app.get('/reauth/:name', (req, res) => {
   const name = decodeURIComponent(req.params.name);
   if (!CLIENT_ID) return res.status(500).send('TRUELAYER_CLIENT_ID not set. <a href="/">Back</a>');
@@ -315,11 +457,9 @@ app.get('/callback', async (req, res) => {
       : 'Bank-' + Date.now();
     const baseName = bankName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
 
-    // Ensure the connection name is unique — handles connecting the same bank twice
     const config = loadConfig();
     const connName = uniqueConnName(baseName, config.connections);
 
-    // Write state matching ConnectionStateSchema: { refreshToken, accounts: {} }
     const state = loadState();
     state.connections[connName] = { refreshToken: tokenData.refresh_token, accounts: {} };
     saveState(state);
@@ -334,7 +474,7 @@ app.get('/callback', async (req, res) => {
     res.send(`<!DOCTYPE html><html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:0 20px">
       <h1>&#9989; ${connName} connected!</h1>
       ${isDuplicate ? `<p>&#8505;&#65039; You already have a connection called <strong>${baseName}</strong>, so this one was saved as <strong>${connName}</strong>.</p>` : ''}
-      <p>Token saved. Now <a href="/accounts/${encodeURIComponent(connName)}">map your accounts &rarr;</a></p>
+      <p>Token saved. Now <a href="/accounts/${encodeURIComponent(connName)}/refresh">discover and map your accounts &rarr;</a></p>
       <p><a href="/">&larr; Back to home</a></p>
     </body></html>`);
   } catch (err) {
@@ -355,18 +495,39 @@ app.get('/delete/:name', (req, res) => {
   res.redirect('/');
 });
 
-// ── Account Discovery & Mapping ───────────────────────────────────────────────
-app.get('/accounts/:name', async (req, res) => {
+// ── Account Mapping — show saved data immediately (no API call) ───────────────
+app.get('/accounts/:name', (req, res) => {
   const name = decodeURIComponent(req.params.name);
   const config = loadConfig();
   const conn = config.connections.find(c => c.name === name);
   if (!conn) return res.status(404).send('Connection not found. <a href="/">Back</a>');
 
-  try {
-    const state = loadState();
-    const connState = state.connections[name];
-    if (!connState) throw new Error('No token for this connection — use Re-authorise on the home page');
+  const rows = buildRows(conn.accounts, null);
+  const notice = conn.accounts.length === 0
+    ? { type: 'info', message: '&#128279; No accounts mapped yet &mdash; click <strong>Sync from bank</strong> to fetch the account list from TrueLayer.' }
+    : null;
 
+  res.send(renderMappingPage(name, conn, rows, notice));
+});
+
+// ── Account Mapping — refresh from TrueLayer API ──────────────────────────────
+app.get('/accounts/:name/refresh', async (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  const config = loadConfig();
+  const conn = config.connections.find(c => c.name === name);
+  if (!conn) return res.status(404).send('Connection not found. <a href="/">Back</a>');
+
+  const state = loadState();
+  const connState = state.connections[name];
+  if (!connState) {
+    const rows = buildRows(conn.accounts, null);
+    return res.send(renderMappingPage(name, conn, rows, {
+      type: 'error',
+      message: '&#9888;&#65039; No token for this connection &mdash; <a href="/reauth/' + encodeURIComponent(name) + '">re-authorise</a> first.'
+    }));
+  }
+
+  try {
     const tokenRes = await fetch(`${AUTH_URL}/connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -391,98 +552,39 @@ app.get('/accounts/:name', async (req, res) => {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const apiData = await apiRes.json();
-    const accounts = apiData.results || [];
+    const liveAccounts = apiData.results || [];
 
-    const allIds = accounts.map(a => a.account_id).join(',');
+    const rows = buildRows(conn.accounts, liveAccounts);
+    const newCount = liveAccounts.filter(a => !conn.accounts.find(s => s.trueLayerId === a.account_id)).length;
+    const notice = {
+      type: 'success',
+      message: `&#9989; Fetched ${liveAccounts.length} account${liveAccounts.length !== 1 ? 's' : ''} from TrueLayer.`
+        + (newCount > 0 ? ` ${newCount} new account${newCount !== 1 ? 's' : ''} discovered.` : ' All accounts already mapped.')
+    };
 
-    const rows = accounts.map(acc => {
-      const existing = conn.accounts.find(a => a.trueLayerId === acc.account_id);
-      const defaultName = acc.display_name || acc.account_type || '';
-      return `<tr>
-          <td>${defaultName}</td>
-          <td><code style="font-size:0.8em">${acc.account_id}</code></td>
-          <td><input name="actualId_${acc.account_id}" value="${existing ? existing.actualId : ''}" placeholder="Paste Actual account ID"></td>
-          <td><input name="friendlyName_${acc.account_id}" value="${existing ? existing.friendlyName : defaultName}" placeholder="e.g. Main Current Account"></td>
-          <td style="text-align:center"><input type="checkbox" name="flip_${acc.account_id}" ${existing && existing.flip ? 'checked' : ''}></td>
-        </tr>`;
-    }).join('');
-
-    res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <title>Map Accounts - ${name}</title>
-  <style>
-    body { font-family: system-ui; max-width: 1000px; margin: 40px auto; padding: 0 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px; border: 1px solid #ddd; text-align: left; vertical-align: middle; }
-    th { background: #f0f0f0; font-size: 0.85em; }
-    input[type=text], input:not([type]) { width: 100%; padding: 6px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; }
-    button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 16px; }
-    a { color: #0066cc; }
-    code { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; }
-    .hint { font-size: 0.85em; color: #555; margin-bottom: 16px; background: #f0f4ff; border-left: 4px solid #1a73e8; padding: 10px 14px; border-radius: 0 4px 4px 0; line-height: 1.7; }
-    .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 10px 14px; border-radius: 4px; margin-top: 12px; font-size: 0.9em; display: none; }
-    code.id { user-select: all; cursor: pointer; }
-  </style>
-</head>
-<body>
-  <h1>&#128194; Map Accounts &mdash; ${name}</h1>
-  <div class="hint">
-    <strong>How to find your Actual Budget account ID:</strong><br>
-    Run the sync container once with <code>--dry-run</code> to list available account IDs:<br>
-    <code>docker compose run --rm truelayer-sync --dry-run</code><br>
-    Or open Actual Budget &rarr; Settings &rarr; Advanced &rarr; copy the ID next to the account.<br>
-    <br>
-    <strong>Friendly Name</strong> is used in sync logs only.<br>
-    <strong>Flip</strong> inverts transaction amounts &mdash; useful if your bank reports credits as negative.
-  </div>
-  <form action="/save-mapping/${encodeURIComponent(name)}" method="POST" onsubmit="return validateForm(event)">
-    <table>
-      <tr>
-        <th>Bank Account</th>
-        <th>TrueLayer ID</th>
-        <th>Actual Budget Account ID</th>
-        <th>Friendly Name</th>
-        <th>Flip</th>
-      </tr>
-      ${rows}
-    </table>
-    <div class="warn" id="warn">&#9888;&#65039; No accounts have an Actual Budget ID filled in. At least one is required to save &mdash; otherwise the sync container will crash on startup.</div>
-    <input type="hidden" name="allIds" value="${allIds}">
-    <button type="submit">&#128190; Save Mappings</button>
-  </form>
-  <script>
-    function validateForm(e) {
-      const ids = document.querySelectorAll('input[name^="actualId_"]');
-      const any = Array.from(ids).some(i => i.value.trim());
-      if (!any) {
-        e.preventDefault();
-        document.getElementById('warn').style.display = 'block';
-        return false;
-      }
-      return true;
-    }
-  </script>
-  <br><a href="/">&larr; Back</a>
-</body>
-</html>`);
+    res.send(renderMappingPage(name, conn, rows, notice));
   } catch (err) {
-    res.status(500).send('Error: ' + err.message + '<br><a href="/">&larr; Back</a>');
+    console.error('Refresh error:', err);
+    const rows = buildRows(conn.accounts, null);
+    res.send(renderMappingPage(name, conn, rows, {
+      type: 'error',
+      message: '&#9888;&#65039; Could not fetch accounts from TrueLayer: ' + err.message + '. Your saved mappings are shown below and can still be edited.'
+    }));
   }
 });
 
+// ── Save Mapping ──────────────────────────────────────────────────────────────
 app.post('/save-mapping/:name', (req, res) => {
   const name = decodeURIComponent(req.params.name);
   const config = loadConfig();
   const conn = config.connections.find(c => c.name === name);
   if (!conn) return res.status(404).send('Connection not found');
 
-  const ids = req.body.allIds.split(',').filter(Boolean);
+  const ids = (req.body.allIds || '').split(',').filter(Boolean);
 
   const mapped = ids
     .map(id => {
       const actualId     = (req.body[`actualId_${id}`] || '').trim();
-      // Default friendlyName to the actualId if left blank rather than silently dropping the row
       const friendlyName = (req.body[`friendlyName_${id}`] || '').trim() || actualId;
       const flip         = req.body[`flip_${id}`] === 'on';
       return { trueLayerId: id, actualId, friendlyName, ...(flip ? { flip: true } : {}) };
