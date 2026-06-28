@@ -23,3 +23,21 @@ services:
       timeout: 5s
       retries: 3
       start_period: 120s
+
+  # ── Setup UI (run on-demand only, never starts with normal `docker compose up`) ──
+  # Usage:
+  #   docker compose --profile setup up -d truelayer-setup
+  #   Open http://<your-server>:3000, complete OAuth, map accounts
+  #   docker compose --profile setup down truelayer-setup
+  truelayer-setup:
+    build: ./truelayer-setup
+    container_name: truelayer-setup
+    ports:
+      - "3000:3000"
+    environment:
+      - TRUELAYER_CLIENT_ID=[TRUELAYER_CLIENT_ID]
+      - TRUELAYER_CLIENT_SECRET=[TRUELAYER_CLIENT_SECRET]
+    volumes:
+      - ./actual-truelayer-sync/data:/app/data # Shared with actual-truelayer-sync
+    profiles:
+      - setup
