@@ -18,11 +18,14 @@ Syncs bank and credit card transactions from [TrueLayer](https://truelayer.com/)
 
 1. Sign up at the [TrueLayer Console](https://console.truelayer.com/).
 2. Create a new project and switch it from **Sandbox** to **Live** mode to access real bank data.
-3. Under **Redirect URIs**, add a redirect URI. The TrueLayer console provides a convenient one you can use:
+3. Under **Redirect URIs**, add your redirect URI in this format:
    ```
-   https://console.truelayer.com/redirect-page
+   http://<your-server-ip>:3099/callback
    ```
+   Replace `<your-server-ip>` with the IP or hostname where you'll run the setup UI.
 4. Copy your **Client ID** and **Client Secret** — you'll need them shortly.
+
+> **Testing with sandbox data?** Leave the project in Sandbox mode and set `TRUELAYER_ENV=sandbox` in your `.env`. The setup UI and sync container will both switch to TrueLayer's mock bank automatically.
 
 ---
 
@@ -30,7 +33,7 @@ Syncs bank and credit card transactions from [TrueLayer](https://truelayer.com/)
 
 Copy the example files and fill in your values:
 
-```
+```bash
 cp compose.example.yml docker-compose.yml
 cp example.env .env
 ```
@@ -39,140 +42,85 @@ Edit `.env` — see the comments in `example.env` for what each variable does.
 
 The key values you need are:
 
-- `ACTUAL_SERVER_URL` — URL of your Actual Budget instance
-- `ACTUAL_SERVER_PASSWORD` — your Actual Budget password
-- `ACTUAL_SYNC_ID` — found under **Settings → Show advanced settings → ID** in Actual Budget
-- `TRUELAYER_CLIENT_ID` and `TRUELAYER_CLIENT_SECRET` — from the TrueLayer Console
+| Variable | Description |
+| --- | --- |
+| `ACTUAL_SERVER_URL` | URL of your Actual Budget instance |
+| `ACTUAL_SERVER_PASSWORD` | Your Actual Budget password |
+| `ACTUAL_SYNC_ID` | Found under **Settings → Show advanced settings → ID** in Actual Budget |
+| `TRUELAYER_CLIENT_ID` | From the TrueLayer Console |
+| `TRUELAYER_CLIENT_SECRET` | From the TrueLayer Console |
+| `REDIRECT_URI` | Must match what you registered in the TrueLayer Console, e.g. `http://<your-server-ip>:3099/callback` |
+| `TRUELAYER_ENV` | Set to `sandbox` for test data, omit or leave blank for live |
 
 ---
 
 ## Adding Your First Bank Connection
 
-The setup script handles the OAuth flow and writes `config.json` and `state.json` into your data directory interactively.
+The setup UI handles the full OAuth flow and writes `config.json` and `state.json` into your data directory.
 
-**Run via Docker (recommended):**
+**1. Start the setup UI:**
 
-```
-docker compose run --rm actual-truelayer-sync npm run setup
-```
-
-**Run locally** (requires Node 20+):
-
-```
-npm install
-npm run dev:setup
+```bash
+docker compose --profile setup up -d truelayer-setup
 ```
 
-The script will:
+**2. Open the UI** in your browser:
 
-1. Ask whether this is a bank account or credit card connection
-2. Build a TrueLayer auth URL for you to open in your browser
-3. Ask you to paste back the redirect URL after authenticating
-4. Let you select which accounts to add and map them to Actual Budget accounts
-5. Write `config.json` and `state.json` to your data directory
+```
+http://<your-server-ip>:3099
+```
 
-Run it again for each additional bank you want to add.
+**3. Connect a bank:**
+
+- Click **Connect a Bank** and choose Bank Account or Credit Card
+- You'll be redirected to TrueLayer to choose and authorise your bank
+- After completing the bank's consent flow you'll be returned to the setup UI automatically
+
+**4. Map accounts:**
+
+- Click **View / Map Accounts** on the newly created connection
+- Each bank account discovered from TrueLayer is listed with its TrueLayer ID
+- Paste the corresponding **Actual Budget account ID** into each row
+- To find your Actual Budget account IDs, run the sync container once with `--dry-run`:
+  ```bash
+  docker compose run --rm truelayer-sync --dry-run
+  ```
+  This logs all available IDs without importing anything.
+- Click **Save Mappings**
+
+**5. Repeat** for any additional banks.
+
+**6. Tear down the setup UI** — it only needs to run on demand:
+
+```bash
+docker compose --profile setup down truelayer-setup
+```
+
+**7. Start the sync container:**
+
+```bash
+docker compose up -d truelayer-sync
+```
 
 ---
 
-## Adding a Connection Manually
+## Re-authorising a Connection
 
-If you prefer not to use the setup script, you can do this with curl.
+TrueLayer tokens expire or can be revoked by your bank. If the setup UI shows **⚠️ No token** next to a connection:
 
-**Step 1 — Authenticate with your bank**
-
-Open this URL in your browser (substituting your Client ID and choosing the appropriate scope):
-
-For bank accounts:
-
-```
-https://auth.truelayer.com/?response_type=code&client_id=[CLIENT_ID]&scope=accounts%20balance%20transactions%20offline_access&redirect_uri=https://console.truelayer.com/redirect-page&providers=uk-ob-all%20uk-oauth-all&response_mode=query
-```
-
-For credit/charge cards:
-
-```
-https://auth.truelayer.com/?response_type=code&client_id=[CLIENT_ID]&scope=cards%20balance%20transactions%20offline_access&redirect_uri=https://console.truelayer.com/redirect-page&providers=uk-ob-all%20uk-oauth-all&response_mode=query
-```
-
-After authenticating with your bank, you'll be redirected to a URL containing a `code` query parameter.
-
-**Step 2 — Exchange the code for tokens**
-
-```
-curl -X POST https://auth.truelayer.com/connect/token \
-  -d grant_type=authorization_code \
-  -d client_id=[CLIENT_ID] \
-  -d client_secret=[CLIENT_SECRET] \
-  -d redirect_uri=https://console.truelayer.com/redirect-page \
-  -d code=[CODE]
-```
-
-The response contains a `refresh_token`. Add this to `state.json` under the connection name.
-
-**Step 3 — Discover account IDs**
-
-Add a connection to `config.json` with an empty `accounts` array and start the container. The first sync will log all available TrueLayer account IDs for that connection:
-
-```
-[My Bank] Unmatched TrueLayer account (not in config):
-  └ My Current Account (TRANSACTION) — trueLayerId: abc123...
-  └ My Savings Account (SAVINGS)     — trueLayerId: def456...
-```
-
-Add the IDs you want to `config.json` along with the corresponding Actual Budget account IDs (found in the URL when viewing an account in Actual Budget), then restart.
-
----
-
-## Config Reference
-
-Configuration is split across two files in your data directory.
-
-### `config.json`
-
-Defines which accounts to sync and how. See `config.example.json` for a full example.
-
-| Field                    | Required | Description                                                                                                                                                                                                                                                      |
-| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`                | Yes      | Must be `2`                                                                                                                                                                                                                                                      |
-| `includeCategoryInNotes` | No       | Appends TrueLayer transaction category to the notes field (default: `false`)                                                                                                                                                                                     |
-| `lookbackDays`           | No       | How many days back to fetch on first sync for an account (default: `14`). Note: TrueLayer currently appears to ignore the `from` date parameter and returns all available transactions regardless — this field is retained in case TrueLayer honour it in future |
-| `connections`            | Yes      | Array of bank connections (see below)                                                                                                                                                                                                                            |
-
-**Connection fields:**
-
-| Field      | Required | Description                                                       |
-| ---------- | -------- | ----------------------------------------------------------------- |
-| `name`     | Yes      | Unique label, used in logs and to match state                     |
-| `isCard`   | No       | Set to `true` if this connection is a credit/charge card provider |
-| `accounts` | Yes      | Array of accounts to sync (empty array = ID discovery mode)       |
-
-**Account fields:**
-
-| Field          | Required | Description                                                                                                         |
-| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| `trueLayerId`  | Yes      | TrueLayer `account_id` for this account                                                                             |
-| `actualId`     | Yes      | Actual Budget account ID                                                                                            |
-| `friendlyName` | Yes      | Label used in logs                                                                                                  |
-| `flip`         | No       | Inverts transaction amounts. Credit card accounts have amounts flipped automatically; use `flip: false` to override |
-| `isCard`       | No       | Overrides the connection-level `isCard` for this specific account                                                   |
-
-### `state.json`
-
-Stores refresh tokens and last sync dates. Written by the app and the setup script — you should not need to edit this manually.
-
-See `state.example.json` for the expected structure.
-
-> **Note:** Both files are excluded from Docker image builds. Mount them via the `./actual-truelayer-sync/data:/app/data` volume in your compose file.
+1. Start the setup UI: `docker compose --profile setup up -d truelayer-setup`
+2. Open the UI and click **🔒 Re-authorise** on the affected connection
+3. Complete the bank consent flow — your account mappings are preserved
+4. Tear down the setup UI
 
 ---
 
 ## Running
 
-Start the container:
+Start the sync container:
 
-```
-docker compose up -d
+```bash
+docker compose up -d truelayer-sync
 ```
 
 By default the sync runs once on startup and exits. Set `CRON_SCHEDULE` in your `.env` to run on a schedule:
@@ -189,9 +137,73 @@ TZ=Europe/London
 
 View logs:
 
+```bash
+docker compose logs -f truelayer-sync
 ```
-docker compose logs -f actual-truelayer-sync
+
+---
+
+## Config Reference
+
+Configuration is split across two files in your data directory (`./actual-truelayer-sync/data/` by default). Both are written by the setup UI — you should not need to edit them manually.
+
+### `config.json`
+
+Defines which accounts to sync and how. See `config.example.json` for a full example.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `version` | Yes | Must be `2` |
+| `includeCategoryInNotes` | No | Appends TrueLayer transaction category to the notes field (default: `false`) |
+| `lookbackDays` | No | How many days back to fetch on first sync for an account (default: `14`). Note: TrueLayer currently appears to ignore the `from` date parameter and returns all available transactions regardless — this field is retained in case TrueLayer honours it in future |
+| `connections` | Yes | Array of bank connections (see below) |
+
+**Connection fields:**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `name` | Yes | Unique label, used in logs and to match state |
+| `isCard` | No | Set to `true` if this connection is a credit/charge card provider |
+| `accounts` | Yes | Array of accounts to sync |
+
+**Account fields:**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `trueLayerId` | Yes | TrueLayer `account_id` for this account |
+| `actualId` | Yes | Actual Budget account ID |
+| `friendlyName` | Yes | Label used in logs |
+| `flip` | No | Inverts transaction amounts. Credit card accounts have amounts flipped automatically; use `flip: false` to override |
+| `isCard` | No | Overrides the connection-level `isCard` for this specific account |
+
+### `state.json`
+
+Stores refresh tokens and per-account last sync dates. Written by the app and the setup UI — you should not need to edit this manually.
+
+See `state.example.json` for the expected structure.
+
+> **Note:** Both files are excluded from Docker image builds. Mount them via the `./actual-truelayer-sync/data:/app/data` volume in your compose file.
+
+---
+
+## Sandbox / Test Mode
+
+TrueLayer provides a sandbox environment with a mock bank and synthetic transactions — useful for testing your setup without connecting a real bank.
+
+**To enable sandbox mode**, add this to your `.env`:
+
 ```
+TRUELAYER_ENV=sandbox
+```
+
+Both the setup UI and the sync container read this variable automatically. In sandbox mode:
+
+- The setup UI shows a **SANDBOX** badge and connects to `auth.truelayer-sandbox.com`
+- The `sandbox-` prefix is added to your Client ID automatically if needed
+- The mock bank provider (`uk-cs-mock`) is used instead of real UK banks
+- The sync container hits `api.truelayer-sandbox.com`
+
+Remove or comment out `TRUELAYER_ENV=sandbox` to switch back to live mode.
 
 ---
 
@@ -207,7 +219,7 @@ This project has made use of AI tooling throughout development:
 
 - **Code review** — reviewing sync logic, error handling, and edge cases; catching bugs and suggesting improvements
 - **Test writing** — generating unit tests for config loading, sync logic, and transaction mapping
-- **The setup script** — `scripts/setup.ts`, including the OAuth flow, interactive prompts, and file writing logic, was written with AI assistance
+- **The setup UI** — `truelayer-setup/server.js`, including the OAuth flow and account mapping, was written with AI assistance
 - **Documentation** — this README was written with AI assistance
 
 The intent is to be transparent about this. All AI-generated code has been reviewed and tested by the author.
