@@ -18,18 +18,22 @@ if (!REDIRECT_URI) {
   process.exit(1);
 }
 
-const CLIENT_ID = process.env.TRUELAYER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.TRUELAYER_CLIENT_SECRET || '';
+const RAW_CLIENT_ID = process.env.TRUELAYER_CLIENT_ID || '';
+const CLIENT_SECRET  = process.env.TRUELAYER_CLIENT_SECRET || '';
 const SANDBOX = (process.env.TRUELAYER_ENV || '').toLowerCase() === 'sandbox';
 
-const AUTH_URL = SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
-const API_URL  = SANDBOX ? 'https://api.truelayer-sandbox.com'  : 'https://api.truelayer.com';
+// In sandbox mode, TrueLayer expects the client_id prefixed with "sandbox-"
+const CLIENT_ID = SANDBOX && RAW_CLIENT_ID && !RAW_CLIENT_ID.startsWith('sandbox-')
+  ? `sandbox-${RAW_CLIENT_ID}`
+  : RAW_CLIENT_ID;
+
+const AUTH_URL  = SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
+const API_URL   = SANDBOX ? 'https://api.truelayer-sandbox.com'  : 'https://api.truelayer.com';
 const PROVIDERS = SANDBOX ? 'uk-cs-mock' : 'uk-ob-all uk-oauth-all';
 
-console.log(`Mode: ${SANDBOX ? 'SANDBOX' : 'LIVE'}`);
-console.log(`Auth: ${AUTH_URL}`);
-console.log(`API:  ${API_URL}`);
-console.log(`Client ID: ${CLIENT_ID || '(not set)'}`);
+console.log(`Mode:         ${SANDBOX ? 'SANDBOX' : 'LIVE'}`);
+console.log(`Client ID:    ${CLIENT_ID || '(not set)'}`);
+console.log(`Auth:         ${AUTH_URL}`);
 console.log(`Redirect URI: ${REDIRECT_URI}`);
 
 function maskSecret(s) {
@@ -70,8 +74,10 @@ function saveState(st) {
 // ── Home ──────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   const config = loadConfig();
-  const state = loadState();
-  const missingCreds = !CLIENT_ID || !CLIENT_SECRET;
+  const state  = loadState();
+  const missingCreds = !RAW_CLIENT_ID || !CLIENT_SECRET;
+  const sandboxPrefixed = SANDBOX && RAW_CLIENT_ID && !RAW_CLIENT_ID.startsWith('sandbox-');
+
   res.send(`<!DOCTYPE html>
 <html>
 <head>
@@ -87,36 +93,41 @@ app.get('/', (req, res) => {
     .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; background: #e8f0fe; color: #1a73e8; margin-left: 6px; }
     a.btn { display: inline-block; padding: 6px 14px; background: #444; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em; margin-top: 8px; margin-right: 6px; }
     .info { border-left: 4px solid #1a73e8; padding: 12px 16px; margin-bottom: 16px; font-size: 0.9em; border-radius: 0 4px 4px 0; line-height: 1.8; }
-    .info.live { background: #e8f0fe; border-left-color: #1a73e8; }
+    .info.live    { background: #e8f0fe; border-left-color: #1a73e8; }
     .info.sandbox { background: #fef7e0; border-left-color: #f9ab00; }
-    .info.error { background: #fce8e6; border-left-color: #c5221f; }
+    .info.error   { background: #fce8e6; border-left-color: #c5221f; }
     .mode-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 0.85em; margin-left: 8px;
       background: ${SANDBOX ? '#f9ab00' : '#1a73e8'}; color: white; vertical-align: middle; }
     code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; font-family: monospace; }
+    .derived { color: #888; font-size: 0.85em; margin-left: 6px; }
     table.env { width: 100%; border-collapse: collapse; margin-top: 4px; }
     table.env td { padding: 4px 8px; }
-    table.env td:first-child { font-weight: 600; width: 140px; color: #555; }
+    table.env td:first-child { font-weight: 600; width: 150px; color: #555; }
   </style>
 </head>
 <body>
-  <h1>&#127974; TrueLayer &rarr; Actual Budget Setup <span class="mode-badge">${SANDBOX ? 'SANDBOX' : 'LIVE'}</span></h1>
+  <h1>&#127974; TrueLayer &rarr; Actual Budget <span class="mode-badge">${SANDBOX ? 'SANDBOX' : 'LIVE'}</span></h1>
 
   <div class="info ${missingCreds ? 'error' : SANDBOX ? 'sandbox' : 'live'}">
     <table class="env">
-      <tr><td>Mode</td><td><strong>${SANDBOX ? '&#9888;&#65039; Sandbox (test data only)' : '&#9989; Live'}</strong></td></tr>
-      <tr><td>Client ID</td><td><code>${CLIENT_ID || '(not set)'}</code></td></tr>
+      <tr><td>Mode</td><td><strong>${SANDBOX ? '&#9888;&#65039; Sandbox &mdash; test data only' : '&#9989; Live'}</strong></td></tr>
+      <tr><td>Client ID</td>
+          <td><code>${CLIENT_ID || '(not set)'}</code>
+          ${sandboxPrefixed ? '<span class="derived">(sandbox- prefix added automatically)</span>' : ''}
+          </td>
+      </tr>
       <tr><td>Client Secret</td><td><code>${maskSecret(CLIENT_SECRET)}</code></td></tr>
       <tr><td>Redirect URI</td><td><code>${REDIRECT_URI}</code></td></tr>
       <tr><td>Auth endpoint</td><td><code>${AUTH_URL}</code></td></tr>
       <tr><td>API endpoint</td><td><code>${API_URL}</code></td></tr>
     </table>
     ${missingCreds ? '<br>&#9888;&#65039; <strong>Missing credentials &mdash; check your .env file.</strong>' : ''}
-    ${SANDBOX ? '<br>To switch to live mode, remove <code>TRUELAYER_ENV=sandbox</code> from your compose env.' : ''}
+    ${SANDBOX ? '<br>Remove <code>TRUELAYER_ENV=sandbox</code> from your compose env to switch to live mode.' : ''}
   </div>
 
   <div class="card">
     <h2>Add Bank Connection</h2>
-    <p>You'll be redirected to TrueLayer to choose and authorise your bank. The connection name is set automatically from your bank.</p>
+    <p>You'll be redirected to TrueLayer to choose and authorise your bank. The connection name is set automatically.</p>
     <form action="/start-auth" method="POST">
       <label>Account Type</label>
       <select name="isCard">
@@ -208,12 +219,10 @@ app.get('/callback', async (req, res) => {
       : 'Bank-' + Date.now();
     const connName = bankName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
 
-    // Save token
     const state = loadState();
     state.connections[connName] = { refreshToken: tokenData.refresh_token, lastSync: null };
     saveState(state);
 
-    // Save config entry
     const config = loadConfig();
     if (!config.connections.find(c => c.name === connName)) {
       config.connections.push({ name: connName, isCard, accounts: [] });
@@ -275,7 +284,7 @@ app.get('/accounts/:name', async (req, res) => {
     const apiData = await apiRes.json();
     const accounts = apiData.results || [];
 
-    const allIds = accounts.map(a => a.account_id).join(',');
+    const allIds   = accounts.map(a => a.account_id).join(',');
     const allNames = accounts.map(a => encodeURIComponent(a.display_name || a.account_type)).join(',');
     const rows = accounts.map(acc => {
       const existing = conn.accounts.find(a => a.trueLayerId === acc.account_id);
@@ -306,11 +315,7 @@ app.get('/accounts/:name', async (req, res) => {
   <p>Paste the <strong>Actual Budget account ID</strong> (from Settings &rarr; Accounts in Actual) next to each account. Leave blank to skip.</p>
   <form action="/save-mapping/${encodeURIComponent(name)}" method="POST">
     <table>
-      <tr>
-        <th>Bank Account Name</th>
-        <th>TrueLayer ID</th>
-        <th>Actual Budget Account ID</th>
-      </tr>
+      <tr><th>Bank Account Name</th><th>TrueLayer ID</th><th>Actual Budget Account ID</th></tr>
       ${rows}
     </table>
     <input type="hidden" name="allIds" value="${allIds}">
@@ -331,7 +336,7 @@ app.post('/save-mapping/:name', (req, res) => {
   const conn = config.connections.find(c => c.name === name);
   if (!conn) return res.status(404).send('Connection not found');
 
-  const ids = req.body.allIds.split(',');
+  const ids   = req.body.allIds.split(',');
   const names = req.body.allNames.split(',').map(n => decodeURIComponent(n));
 
   conn.accounts = ids
@@ -353,8 +358,8 @@ app.post('/save-mapping/:name', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Setup UI running on http://0.0.0.0:${PORT}`);
-  console.log(`Mode: ${SANDBOX ? 'SANDBOX' : 'LIVE'}`);
-  console.log(`Client ID: ${CLIENT_ID || '(not set)'}`);
-  console.log(`Client Secret: ${maskSecret(CLIENT_SECRET)}`);
+  console.log(`Mode:         ${SANDBOX ? 'SANDBOX' : 'LIVE'}`);
+  console.log(`Client ID:    ${CLIENT_ID || '(not set)'}`);
+  console.log(`Client Secret:${maskSecret(CLIENT_SECRET)}`);
   console.log(`Redirect URI: ${REDIRECT_URI}`);
 });
