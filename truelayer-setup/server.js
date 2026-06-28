@@ -20,6 +20,17 @@ if (!REDIRECT_URI) {
 
 const CLIENT_ID = process.env.TRUELAYER_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.TRUELAYER_CLIENT_SECRET || '';
+const SANDBOX = (process.env.TRUELAYER_ENV || '').toLowerCase() === 'sandbox';
+
+const AUTH_URL = SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
+const API_URL  = SANDBOX ? 'https://api.truelayer-sandbox.com'  : 'https://api.truelayer.com';
+const PROVIDERS = SANDBOX ? 'uk-cs-mock' : 'uk-ob-all uk-oauth-all';
+
+console.log(`Mode: ${SANDBOX ? 'SANDBOX' : 'LIVE'}`);
+console.log(`Auth: ${AUTH_URL}`);
+console.log(`API:  ${API_URL}`);
+console.log(`Client ID: ${CLIENT_ID || '(not set)'}`);
+console.log(`Redirect URI: ${REDIRECT_URI}`);
 
 function maskSecret(s) {
   if (!s) return '(not set)';
@@ -60,6 +71,7 @@ function saveState(st) {
 app.get('/', (req, res) => {
   const config = loadConfig();
   const state = loadState();
+  const missingCreds = !CLIENT_ID || !CLIENT_SECRET;
   res.send(`<!DOCTYPE html>
 <html>
 <head>
@@ -74,8 +86,12 @@ app.get('/', (req, res) => {
     .card { background: white; border: 1px solid #ddd; padding: 16px; margin: 12px 0; border-radius: 6px; }
     .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; background: #e8f0fe; color: #1a73e8; margin-left: 6px; }
     a.btn { display: inline-block; padding: 6px 14px; background: #444; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em; margin-top: 8px; margin-right: 6px; }
-    .info { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 12px 16px; margin-bottom: 16px; font-size: 0.9em; border-radius: 0 4px 4px 0; line-height: 1.8; }
-    .info.warn { background: #fce8e6; border-left-color: #c5221f; }
+    .info { border-left: 4px solid #1a73e8; padding: 12px 16px; margin-bottom: 16px; font-size: 0.9em; border-radius: 0 4px 4px 0; line-height: 1.8; }
+    .info.live { background: #e8f0fe; border-left-color: #1a73e8; }
+    .info.sandbox { background: #fef7e0; border-left-color: #f9ab00; }
+    .info.error { background: #fce8e6; border-left-color: #c5221f; }
+    .mode-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-weight: 700; font-size: 0.85em; margin-left: 8px;
+      background: ${SANDBOX ? '#f9ab00' : '#1a73e8'}; color: white; vertical-align: middle; }
     code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; font-family: monospace; }
     table.env { width: 100%; border-collapse: collapse; margin-top: 4px; }
     table.env td { padding: 4px 8px; }
@@ -83,15 +99,19 @@ app.get('/', (req, res) => {
   </style>
 </head>
 <body>
-  <h1>&#127974; TrueLayer &rarr; Actual Budget Setup</h1>
+  <h1>&#127974; TrueLayer &rarr; Actual Budget Setup <span class="mode-badge">${SANDBOX ? 'SANDBOX' : 'LIVE'}</span></h1>
 
-  <div class="info${!CLIENT_ID || !CLIENT_SECRET ? ' warn' : ''}">
+  <div class="info ${missingCreds ? 'error' : SANDBOX ? 'sandbox' : 'live'}">
     <table class="env">
+      <tr><td>Mode</td><td><strong>${SANDBOX ? '&#9888;&#65039; Sandbox (test data only)' : '&#9989; Live'}</strong></td></tr>
       <tr><td>Client ID</td><td><code>${CLIENT_ID || '(not set)'}</code></td></tr>
       <tr><td>Client Secret</td><td><code>${maskSecret(CLIENT_SECRET)}</code></td></tr>
       <tr><td>Redirect URI</td><td><code>${REDIRECT_URI}</code></td></tr>
+      <tr><td>Auth endpoint</td><td><code>${AUTH_URL}</code></td></tr>
+      <tr><td>API endpoint</td><td><code>${API_URL}</code></td></tr>
     </table>
-    ${!CLIENT_ID || !CLIENT_SECRET ? '<br>&#9888;&#65039; <strong>Missing credentials — check your .env file.</strong>' : ''}
+    ${missingCreds ? '<br>&#9888;&#65039; <strong>Missing credentials &mdash; check your .env file.</strong>' : ''}
+    ${SANDBOX ? '<br>To switch to live mode, remove <code>TRUELAYER_ENV=sandbox</code> from your compose env.' : ''}
   </div>
 
   <div class="card">
@@ -136,12 +156,12 @@ app.post('/start-auth', (req, res) => {
 
   const stateParam = JSON.stringify({ isCard: isCard === 'true' });
 
-  const url = `https://auth.truelayer.com/?${new URLSearchParams({
+  const url = `${AUTH_URL}/?${new URLSearchParams({
     response_type: 'code',
     client_id: CLIENT_ID,
     scope,
     redirect_uri: REDIRECT_URI,
-    providers: 'uk-ob-all uk-oauth-all',
+    providers: PROVIDERS,
     response_mode: 'query',
     state: stateParam
   })}`;
@@ -161,7 +181,7 @@ app.get('/callback', async (req, res) => {
   } catch (_) {}
 
   try {
-    const tokenRes = await fetch('https://auth.truelayer.com/connect/token', {
+    const tokenRes = await fetch(`${AUTH_URL}/connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -178,7 +198,7 @@ app.get('/callback', async (req, res) => {
 
     // Fetch bank name
     const endpoint = isCard ? 'cards' : 'accounts';
-    const accountsRes = await fetch(`https://api.truelayer.com/data/v1/${endpoint}`, {
+    const accountsRes = await fetch(`${API_URL}/data/v1/${endpoint}`, {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const accountsData = await accountsRes.json();
@@ -235,7 +255,7 @@ app.get('/accounts/:name', async (req, res) => {
     const connState = state.connections[name];
     if (!connState) throw new Error('No token for this connection — re-authorise from home page');
 
-    const tokenRes = await fetch('https://auth.truelayer.com/connect/token', {
+    const tokenRes = await fetch(`${AUTH_URL}/connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -249,7 +269,7 @@ app.get('/accounts/:name', async (req, res) => {
     if (!tokenData.access_token) throw new Error('Token refresh failed: ' + JSON.stringify(tokenData));
 
     const endpoint = conn.isCard ? 'cards' : 'accounts';
-    const apiRes = await fetch(`https://api.truelayer.com/data/v1/${endpoint}`, {
+    const apiRes = await fetch(`${API_URL}/data/v1/${endpoint}`, {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const apiData = await apiRes.json();
@@ -333,6 +353,7 @@ app.post('/save-mapping/:name', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Setup UI running on http://0.0.0.0:${PORT}`);
+  console.log(`Mode: ${SANDBOX ? 'SANDBOX' : 'LIVE'}`);
   console.log(`Client ID: ${CLIENT_ID || '(not set)'}`);
   console.log(`Client Secret: ${maskSecret(CLIENT_SECRET)}`);
   console.log(`Redirect URI: ${REDIRECT_URI}`);
