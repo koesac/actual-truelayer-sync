@@ -103,6 +103,15 @@ app.get('/', (req, res) => {
     table.env { width: 100%; border-collapse: collapse; margin-top: 4px; }
     table.env td { padding: 4px 8px; }
     table.env td:first-child { font-weight: 600; width: 150px; color: #555; }
+    /* Confirmation dialog */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:100; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal { background:#fff; border-radius:8px; padding:24px 28px; max-width:380px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.18); }
+    .modal h3 { margin:0 0 10px; }
+    .modal p  { margin:0 0 20px; font-size:0.95em; color:#555; }
+    .modal-actions { display:flex; gap:10px; justify-content:flex-end; }
+    .btn-danger { padding:8px 18px; background:#c5221f; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9em; }
+    .btn-cancel { padding:8px 18px; background:#eee; color:#333; border:none; border-radius:4px; cursor:pointer; font-size:0.9em; }
   </style>
 </head>
 <body>
@@ -148,15 +157,45 @@ app.get('/', (req, res) => {
         ${hasToken ? '&#9989; Authorised' : '&#9888;&#65039; No token'}
       </span>
       <br><br>
-      ${hasToken ? `<a class="btn" href="/accounts/${encodeURIComponent(c.name)}">View / Map Accounts</a>` : ''}
-      <a class="btn" style="background:#c5221f" href="/delete/${encodeURIComponent(c.name)}">Remove</a>
+      ${hasToken
+        ? `<a class="btn" href="/accounts/${encodeURIComponent(c.name)}">View / Map Accounts</a>`
+        : `<a class="btn" style="background:#0066cc" href="/reauth/${encodeURIComponent(c.name)}">&#128274; Re-authorise</a>`
+      }
+      <button class="btn" style="background:#c5221f;color:white;font-size:0.9em" onclick="confirmDelete('${c.name.replace(/'/g, "\\'")}')">Remove</button>
     </div>`;
   }).join('')}
+
+  <!-- Delete confirmation modal -->
+  <div class="modal-overlay" id="deleteModal">
+    <div class="modal">
+      <h3>Remove connection?</h3>
+      <p>This will delete <strong id="deleteName"></strong> and its refresh token. The sync will stop working for this bank until you re-add it.</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <a class="btn-danger" id="deleteLink" href="#">Remove</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function confirmDelete(name) {
+      document.getElementById('deleteName').textContent = name;
+      document.getElementById('deleteLink').href = '/delete/' + encodeURIComponent(name);
+      document.getElementById('deleteModal').classList.add('open');
+    }
+    function closeModal() {
+      document.getElementById('deleteModal').classList.remove('open');
+    }
+    // Close on backdrop click
+    document.getElementById('deleteModal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+  </script>
 </body>
 </html>`);
 });
 
-// ── Start OAuth ───────────────────────────────────────────────────────────────
+// ── Start OAuth (new connection) ──────────────────────────────────────────────
 app.post('/start-auth', (req, res) => {
   const { isCard } = req.body;
   if (!CLIENT_ID) return res.status(500).send('TRUELAYER_CLIENT_ID not set. <a href="/">Back</a>');
@@ -180,15 +219,47 @@ app.post('/start-auth', (req, res) => {
   res.redirect(url);
 });
 
+// ── Re-authorise existing connection ─────────────────────────────────────────
+// Sends the user through OAuth again but tags the state with the existing
+// connection name so the callback can restore the token without touching config.
+app.get('/reauth/:name', (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  if (!CLIENT_ID) return res.status(500).send('TRUELAYER_CLIENT_ID not set. <a href="/">Back</a>');
+
+  const config = loadConfig();
+  const conn = config.connections.find(c => c.name === name);
+  if (!conn) return res.status(404).send('Connection not found. <a href="/">Back</a>');
+
+  const scope = conn.isCard
+    ? 'cards balance transactions offline_access'
+    : 'accounts balance transactions offline_access';
+
+  const stateParam = JSON.stringify({ isCard: conn.isCard, reauth: name });
+
+  const url = `${AUTH_URL}/?${new URLSearchParams({
+    response_type: 'code',
+    client_id: CLIENT_ID,
+    scope,
+    redirect_uri: REDIRECT_URI,
+    providers: PROVIDERS,
+    response_mode: 'query',
+    state: stateParam
+  })}`;
+
+  res.redirect(url);
+});
+
 // ── OAuth Callback ────────────────────────────────────────────────────────────
 app.get('/callback', async (req, res) => {
   const { code, state: stateParam } = req.query;
   if (!code) return res.status(400).send('Missing authorisation code. <a href="/">Try again</a>');
 
   let isCard = false;
+  let reauthName = null;
   try {
     const parsed = JSON.parse(stateParam || '{}');
     isCard = parsed.isCard || false;
+    reauthName = parsed.reauth || null;
   } catch (_) {}
 
   try {
@@ -207,6 +278,20 @@ app.get('/callback', async (req, res) => {
     const tokenData = await tokenRes.json();
     if (!tokenData.refresh_token) throw new Error('No refresh token: ' + JSON.stringify(tokenData));
 
+    // ── Re-auth: just refresh the token for an existing connection ──
+    if (reauthName) {
+      const state = loadState();
+      const existing = state.connections[reauthName] || { accounts: {} };
+      state.connections[reauthName] = { ...existing, refreshToken: tokenData.refresh_token };
+      saveState(state);
+      return res.send(`<!DOCTYPE html><html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:0 20px">
+        <h1>&#9989; ${reauthName} re-authorised!</h1>
+        <p>Fresh token saved. The sync will resume on its next scheduled run.</p>
+        <p><a href="/">&larr; Back to home</a></p>
+      </body></html>`);
+    }
+
+    // ── New connection: discover bank name and save everything ──
     const endpoint = isCard ? 'cards' : 'accounts';
     const accountsRes = await fetch(`${API_URL}/data/v1/${endpoint}`, {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
@@ -262,7 +347,7 @@ app.get('/accounts/:name', async (req, res) => {
   try {
     const state = loadState();
     const connState = state.connections[name];
-    if (!connState) throw new Error('No token for this connection — re-authorise from home page');
+    if (!connState) throw new Error('No token for this connection — use Re-authorise on the home page');
 
     const tokenRes = await fetch(`${AUTH_URL}/connect/token`, {
       method: 'POST',
@@ -277,6 +362,12 @@ app.get('/accounts/:name', async (req, res) => {
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) throw new Error('Token refresh failed: ' + JSON.stringify(tokenData));
 
+    // Persist the rotated refresh token — TrueLayer tokens are single-use
+    if (tokenData.refresh_token) {
+      connState.refreshToken = tokenData.refresh_token;
+      saveState(state);
+    }
+
     const endpoint = conn.isCard ? 'cards' : 'accounts';
     const apiRes = await fetch(`${API_URL}/data/v1/${endpoint}`, {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
@@ -284,15 +375,16 @@ app.get('/accounts/:name', async (req, res) => {
     const apiData = await apiRes.json();
     const accounts = apiData.results || [];
 
-    const allIds   = accounts.map(a => a.account_id).join(',');
+    const allIds = accounts.map(a => a.account_id).join(',');
 
     const rows = accounts.map(acc => {
       const existing = conn.accounts.find(a => a.trueLayerId === acc.account_id);
+      const defaultName = acc.display_name || acc.account_type || '';
       return `<tr>
-          <td>${acc.display_name || acc.account_type}</td>
+          <td>${defaultName}</td>
           <td><code style="font-size:0.8em">${acc.account_id}</code></td>
           <td><input name="actualId_${acc.account_id}" value="${existing ? existing.actualId : ''}" placeholder="Paste Actual account ID"></td>
-          <td><input name="friendlyName_${acc.account_id}" value="${existing ? existing.friendlyName : (acc.display_name || acc.account_type)}" placeholder="e.g. Main Current Account"></td>
+          <td><input name="friendlyName_${acc.account_id}" value="${existing ? existing.friendlyName : defaultName}" placeholder="e.g. Main Current Account"></td>
           <td style="text-align:center"><input type="checkbox" name="flip_${acc.account_id}" ${existing && existing.flip ? 'checked' : ''}></td>
         </tr>`;
     }).join('');
@@ -310,16 +402,22 @@ app.get('/accounts/:name', async (req, res) => {
     button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 16px; }
     a { color: #0066cc; }
     code { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; }
-    .hint { font-size: 0.85em; color: #666; margin-bottom: 12px; }
+    .hint { font-size: 0.85em; color: #555; margin-bottom: 16px; background: #f0f4ff; border-left: 4px solid #1a73e8; padding: 10px 14px; border-radius: 0 4px 4px 0; line-height: 1.7; }
     .warn { background: #fff3cd; border: 1px solid #ffc107; padding: 10px 14px; border-radius: 4px; margin-top: 12px; font-size: 0.9em; display: none; }
+    code.id { user-select: all; cursor: pointer; }
   </style>
 </head>
 <body>
   <h1>&#128194; Map Accounts &mdash; ${name}</h1>
-  <p class="hint">
-    Find your <strong>Actual Budget account ID</strong> in Actual: Settings &rarr; click an account &rarr; the ID is in the URL or shown under Advanced.<br>
-    <strong>Friendly Name</strong> is used in sync logs. <strong>Flip</strong> inverts transaction amounts (useful for credit cards shown as positive).
-  </p>
+  <div class="hint">
+    <strong>How to find your Actual Budget account ID:</strong><br>
+    Run the sync container once with <code>--dry-run</code> to list available account IDs:<br>
+    <code>docker compose run --rm truelayer-sync --dry-run</code><br>
+    Or open Actual Budget &rarr; Settings &rarr; Advanced &rarr; copy the ID next to the account.<br>
+    <br>
+    <strong>Friendly Name</strong> is used in sync logs only.<br>
+    <strong>Flip</strong> inverts transaction amounts &mdash; useful if your bank reports credits as negative.
+  </div>
   <form action="/save-mapping/${encodeURIComponent(name)}" method="POST" onsubmit="return validateForm(event)">
     <table>
       <tr>
@@ -331,7 +429,7 @@ app.get('/accounts/:name', async (req, res) => {
       </tr>
       ${rows}
     </table>
-    <div class="warn" id="warn">&#9888;&#65039; No accounts have an Actual Budget ID filled in. At least one is required to save — otherwise the sync container will crash on startup.</div>
+    <div class="warn" id="warn">&#9888;&#65039; No accounts have an Actual Budget ID filled in. At least one is required to save &mdash; otherwise the sync container will crash on startup.</div>
     <input type="hidden" name="allIds" value="${allIds}">
     <button type="submit">&#128190; Save Mappings</button>
   </form>
@@ -366,11 +464,12 @@ app.post('/save-mapping/:name', (req, res) => {
   const mapped = ids
     .map(id => {
       const actualId     = (req.body[`actualId_${id}`] || '').trim();
-      const friendlyName = (req.body[`friendlyName_${id}`] || '').trim();
+      // Default friendlyName to the actualId if left blank rather than silently dropping the row
+      const friendlyName = (req.body[`friendlyName_${id}`] || '').trim() || actualId;
       const flip         = req.body[`flip_${id}`] === 'on';
       return { trueLayerId: id, actualId, friendlyName, ...(flip ? { flip: true } : {}) };
     })
-    .filter(a => a.actualId && a.friendlyName);
+    .filter(a => a.actualId);
 
   if (mapped.length === 0) {
     return res.status(400).send(`<h1>&#9888;&#65039; Nothing saved</h1>
