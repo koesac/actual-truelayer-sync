@@ -186,10 +186,22 @@ app.get('/accounts/:name', async (req, res) => {
     const apiData = await apiRes.json();
     const accounts = apiData.results || [];
 
+    const allIds = accounts.map(a => a.account_id).join(',');
+    const allNames = accounts.map(a => encodeURIComponent(a.display_name || a.account_type)).join(',');
+
+    const rows = accounts.map(acc => {
+      const existing = conn.accounts.find(a => a.trueLayerId === acc.account_id);
+      return `<tr>
+          <td>${acc.display_name || acc.account_type}</td>
+          <td><code>${acc.account_id}</code></td>
+          <td><input name="mapping_${acc.account_id}" value="${existing ? existing.actualId : ''}" placeholder="e.g. abc123..."></td>
+        </tr>`;
+    }).join('');
+
     res.send(`<!DOCTYPE html>
 <html>
 <head>
-  <title>Map Accounts — ${name}</title>
+  <title>Map Accounts - ${name}</title>
   <style>
     body { font-family: system-ui; max-width: 800px; margin: 40px auto; padding: 0 20px; }
     table { width: 100%; border-collapse: collapse; }
@@ -202,7 +214,7 @@ app.get('/accounts/:name', async (req, res) => {
   </style>
 </head>
 <body>
-  <h1>&#128194; Map Accounts — ${name}</h1>
+  <h1>&#128194; Map Accounts - ${name}</h1>
   <p>Paste the <strong>Actual Budget account ID</strong> (from Settings &rarr; Accounts in Actual) next to each account. Leave blank to skip.</p>
   <form action="/save-mapping/${encodeURIComponent(name)}" method="POST">
     <table>
@@ -211,17 +223,10 @@ app.get('/accounts/:name', async (req, res) => {
         <th>TrueLayer ID</th>
         <th>Actual Budget Account ID</th>
       </tr>
-      ${accounts.map(acc => {
-        const existing = conn.accounts.find(a => a.trueLayerId === acc.account_id);
-        return `<tr>
-          <td>${acc.display_name || acc.account_type}</td>
-          <td><code>${acc.account_id}</code></td>
-          <td><input name="mapping_${acc.account_id}" value="${existing ? existing.actualId : ''}" placeholder="e.g. abc123..."></td>
-        </tr>`;
-      }).join('')}
+      ${rows}
     </table>
-    <input type="hidden" name="allIds" value="${accounts.map(a => a.account_id).join(','')}">
-    <input type="hidden" name="allNames" value="${accounts.map(a => encodeURIComponent(a.display_name || a.account_type)).join(','')}">
+    <input type="hidden" name="allIds" value="${allIds}">
+    <input type="hidden" name="allNames" value="${allNames}">
     <button type="submit">&#128190; Save Mappings</button>
   </form>
   <br><a href="/">&larr; Back</a>
@@ -252,7 +257,7 @@ app.post('/save-mapping/:name', (req, res) => {
     <p><a href="/">&larr; Back to home</a></p>
     <hr>
     <p>Start your scheduled sync:</p>
-    <pre style="background:#f4f4f4;padding:12px;border-radius:4px">docker compose up -d truelayer-sync</pre>
+    <pre style="background:#f4f4f4;padding:12px;border-radius:4px">docker compose up -d actual-truelayer-sync</pre>
     <p>Then tear down this setup UI:</p>
     <pre style="background:#f4f4f4;padding:12px;border-radius:4px">docker compose --profile setup down truelayer-setup</pre>
   </body></html>`);
