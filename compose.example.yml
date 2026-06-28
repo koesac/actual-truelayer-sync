@@ -15,9 +15,9 @@ services:
       - TRUELAYER_CLIENT_ID=[TRUELAYER_CLIENT_ID]
       - TRUELAYER_CLIENT_SECRET=[TRUELAYER_CLIENT_SECRET]
       - CRON_SCHEDULE=0 */4 * * * # Example: Every 4 hours
-      # Uncomment to use TrueLayer's sandbox environment with mock bank data.
-      # The client_id is automatically prefixed with "sandbox-" if needed.
-      # - TRUELAYER_ENV=sandbox
+      # Inherited from .env — set TRUELAYER_ENV=sandbox there to enable sandbox mode.
+      # Both services pick it up automatically with no other changes needed.
+      - TRUELAYER_ENV
     healthcheck:
       # Health check that state.json has been modified recently, indicating the sync is running successfully.
       # 300 minutes (5 hours) against a 4-hour schedule — gives an hour of buffer
@@ -41,8 +41,8 @@ services:
       - TRUELAYER_CLIENT_ID=[TRUELAYER_CLIENT_ID]
       - TRUELAYER_CLIENT_SECRET=[TRUELAYER_CLIENT_SECRET]
       - REDIRECT_URI=http://[HOST_IP]:3099/callback
-      # Uncomment to use TrueLayer's sandbox environment.
-      # - TRUELAYER_ENV=sandbox
+      # Inherited from .env — same TRUELAYER_ENV value as the sync container.
+      - TRUELAYER_ENV
     volumes:
       - ./actual-truelayer-sync/data:/app/data # Shared with actual-truelayer-sync
     profiles:
