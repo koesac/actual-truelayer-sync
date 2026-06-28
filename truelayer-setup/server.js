@@ -71,6 +71,18 @@ function saveState(st) {
   fs.writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
 }
 
+/**
+ * Given a base name (e.g. "Monzo"), return a name that does not already exist
+ * in config.connections. If "Monzo" is taken, tries "Monzo-2", "Monzo-3", etc.
+ */
+function uniqueConnName(base, existingConnections) {
+  const existing = new Set(existingConnections.map(c => c.name));
+  if (!existing.has(base)) return base;
+  let i = 2;
+  while (existing.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
 // ── Home ──────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   const config = loadConfig();
@@ -136,7 +148,7 @@ app.get('/', (req, res) => {
 
   <div class="card">
     <h2>Add Bank Connection</h2>
-    <p>You\'ll be redirected to TrueLayer to choose and authorise your bank. The connection name is set automatically.</p>
+    <p>You\'ll be redirected to TrueLayer to choose and authorise your bank. The connection name is set automatically from the bank\'s display name &mdash; if you already have a connection with the same name, a suffix is added (e.g. <em>Monzo-2</em>).</p>
     <form action="/start-auth" method="POST">
       <label>Account Type</label>
       <select name="isCard">
@@ -301,21 +313,27 @@ app.get('/callback', async (req, res) => {
     const bankName = firstAccount
       ? (firstAccount.provider ? firstAccount.provider.display_name : firstAccount.display_name)
       : 'Bank-' + Date.now();
-    const connName = bankName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+    const baseName = bankName.replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+
+    // Ensure the connection name is unique — handles connecting the same bank twice
+    const config = loadConfig();
+    const connName = uniqueConnName(baseName, config.connections);
 
     // Write state matching ConnectionStateSchema: { refreshToken, accounts: {} }
     const state = loadState();
     state.connections[connName] = { refreshToken: tokenData.refresh_token, accounts: {} };
     saveState(state);
 
-    const config = loadConfig();
     if (!config.connections.find(c => c.name === connName)) {
       config.connections.push({ name: connName, isCard, accounts: [] });
       saveConfig(config);
     }
 
+    const isDuplicate = connName !== baseName;
+
     res.send(`<!DOCTYPE html><html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:0 20px">
       <h1>&#9989; ${connName} connected!</h1>
+      ${isDuplicate ? `<p>&#8505;&#65039; You already have a connection called <strong>${baseName}</strong>, so this one was saved as <strong>${connName}</strong>.</p>` : ''}
       <p>Token saved. Now <a href="/accounts/${encodeURIComponent(connName)}">map your accounts &rarr;</a></p>
       <p><a href="/">&larr; Back to home</a></p>
     </body></html>`);
