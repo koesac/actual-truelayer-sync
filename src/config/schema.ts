@@ -16,11 +16,8 @@ export const AccountSchema = z
   .transform((val) => {
     const resolved = val.friendlyName ?? val.name
     if (!resolved) {
-      // This path is hit only when neither field is present; Zod will surface
-      // the error via the refine below.
       return { ...val, friendlyName: '' }
     }
-    // Normalise: always expose `friendlyName`, drop the legacy `name` key.
     const { name: _dropped, ...rest } = val
     return { ...rest, friendlyName: resolved }
   })
@@ -47,13 +44,53 @@ export const FileConfigSchema = z
     path: ['connections'],
   })
 
+/**
+ * Credentials stored in data/credentials.json (volume-mounted, gitignored).
+ * All fields optional — only present fields override env vars.
+ */
+export const CredentialsSchema = z.object({
+  TRUELAYER_CLIENT_ID: z.string().optional(),
+  TRUELAYER_CLIENT_SECRET: z.string().optional(),
+  TRUELAYER_ENV: z.enum(['live', 'sandbox']).optional(),
+  ACTUAL_SERVER_URL: z.string().optional(),
+  ACTUAL_SERVER_PASSWORD: z.string().optional(),
+  ACTUAL_SYNC_ID: z.string().optional(),
+  CRON_SCHEDULE: z.string().optional(),
+})
+
+/**
+ * EnvSchema: all credential fields are optional with empty-string defaults so
+ * the process can start without them in the environment (credentials.json is
+ * loaded separately and merged in config.ts before validation).
+ */
 export const EnvSchema = z.object({
-  TRUELAYER_CLIENT_ID: z.string().min(1),
-  TRUELAYER_CLIENT_SECRET: z.string().min(1),
+  TRUELAYER_CLIENT_ID: z.string().default(''),
+  TRUELAYER_CLIENT_SECRET: z.string().default(''),
   TRUELAYER_ENV: z.enum(['live', 'sandbox']).default('live'),
-  ACTUAL_SERVER_URL: z.url(),
-  ACTUAL_SERVER_PASSWORD: z.string().min(1),
-  ACTUAL_SYNC_ID: z.uuid(),
+  ACTUAL_SERVER_URL: z.string().default(''),
+  ACTUAL_SERVER_PASSWORD: z.string().default(''),
+  ACTUAL_SYNC_ID: z.string().default(''),
+  CRON_SCHEDULE: z
+    .string()
+    .optional()
+    .refine((val) => val === undefined || cron.validate(val), { message: 'Invalid cron expression' }),
+  DEBUG: z.string().optional(),
+  TZ: z.string().optional(),
+  LOG_FORMAT: z.enum(['text', 'json']).default('json'),
+})
+
+/**
+ * The fully-resolved, validated env shape after merging credentials.json over
+ * environment variables.  All credential strings must be non-empty at this
+ * point — enforced by ValidatedEnvSchema used inside loadConfig().
+ */
+export const ValidatedEnvSchema = z.object({
+  TRUELAYER_CLIENT_ID: z.string().min(1, 'TRUELAYER_CLIENT_ID is required'),
+  TRUELAYER_CLIENT_SECRET: z.string().min(1, 'TRUELAYER_CLIENT_SECRET is required'),
+  TRUELAYER_ENV: z.enum(['live', 'sandbox']).default('live'),
+  ACTUAL_SERVER_URL: z.url('ACTUAL_SERVER_URL must be a valid URL'),
+  ACTUAL_SERVER_PASSWORD: z.string().min(1, 'ACTUAL_SERVER_PASSWORD is required'),
+  ACTUAL_SYNC_ID: z.uuid('ACTUAL_SYNC_ID must be a valid UUID'),
   CRON_SCHEDULE: z
     .string()
     .optional()
@@ -79,9 +116,10 @@ export const StateSchema = z.object({
 export type Account = z.infer<typeof AccountSchema>
 export type Connection = z.infer<typeof ConnectionSchema>
 export type FileConfig = z.infer<typeof FileConfigSchema>
+export type Credentials = z.infer<typeof CredentialsSchema>
 export type AccountState = z.infer<typeof AccountStateSchema>
 export type ConnectionState = z.infer<typeof ConnectionStateSchema>
-export type Env = z.infer<typeof EnvSchema>
+export type Env = z.infer<typeof ValidatedEnvSchema>
 export type State = z.infer<typeof StateSchema>
 
 export type Config = FileConfig & {
