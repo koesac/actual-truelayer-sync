@@ -1,0 +1,59 @@
+services:
+  actual-server:
+    image: actualbudget/actual-server:latest
+    container_name: actual-server
+    ports:
+      - "5006:5006"
+    volumes:
+      - ./actual-data:/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - finance
+
+  truelayer-sync:
+    build: .
+    image: actual-truelayer-sync:local
+    container_name: truelayer-sync
+    environment:
+      - TRUELAYER_CLIENT_ID=${TRUELAYER_CLIENT_ID}
+      - TRUELAYER_CLIENT_SECRET=${TRUELAYER_CLIENT_SECRET}
+      - ACTUAL_SERVER_URL=http://actual-server:5006
+      - ACTUAL_SYNC_ID=${ACTUAL_SYNC_ID}
+      - ACTUAL_SERVER_PASSWORD=${ACTUAL_SERVER_PASSWORD}
+      - CRON_SCHEDULE=0 */4 * * *
+      - TZ=Europe/London
+    volumes:
+      - ./truelayer-data:/app/data
+    restart: unless-stopped
+    networks:
+      - finance
+    depends_on:
+      - actual-server
+    healthcheck:
+      test: ["CMD-SHELL", "find /app/data/state.json -mmin -300 | grep -q ."]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+  
+  truelayer-setup:
+    build: ./actual-truelayer-sync/truelayer-setup
+    container_name: truelayer-setup
+    ports:
+      - "3099:3099"
+    environment:
+      - TRUELAYER_CLIENT_ID=${TRUELAYER_CLIENT_ID}
+      - TRUELAYER_CLIENT_SECRET=${TRUELAYER_CLIENT_SECRET}
+      - REDIRECT_URI=https://truelayer.alexkoester.com/callback
+      - TRUELAYER_ENV=sandbox
+    volumes:
+      - ./truelayer-data:/app/data
+    networks:
+      - finance
+    profiles:
+      - setup
+networks:
+  finance:
+    driver: bridge
