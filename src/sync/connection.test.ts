@@ -25,6 +25,7 @@ const baseConfig: Config = {
   env: {
     TRUELAYER_CLIENT_ID: 'client-id',
     TRUELAYER_CLIENT_SECRET: 'client-secret',
+    TRUELAYER_ENV: 'live',
     ACTUAL_SERVER_URL: 'http://localhost:5006',
     ACTUAL_SERVER_PASSWORD: 'password',
     ACTUAL_SYNC_ID: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
