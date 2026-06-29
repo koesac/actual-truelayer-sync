@@ -42,7 +42,7 @@ services:
       - REDIRECT_URI=https://truelayer.alexkoester.com/callback
     volumes:
       - ./truelayer-data:/app/data
-      - ./truelayer-setup/server.js:/app/server.js:ro
+      - /home/koesac/apps/actual-truelayer-sync/truelayer-setup/server.js:/app/server.js:ro
     networks:
       - finance
     profiles:
