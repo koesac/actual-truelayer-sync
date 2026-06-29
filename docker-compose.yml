@@ -12,16 +12,11 @@ services:
     networks:
       - finance
 
-  truelayer-sync:
-    build: .
-    image: actual-truelayer-sync:local
-    container_name: truelayer-sync
+  actual-truelayer-sync:
+    image: ghcr.io/koesac/actual-truelayer-sync:latest
+    container_name: actual-truelayer-sync
     environment:
-      - TRUELAYER_CLIENT_ID=${TRUELAYER_CLIENT_ID}
-      - TRUELAYER_CLIENT_SECRET=${TRUELAYER_CLIENT_SECRET}
       - ACTUAL_SERVER_URL=http://actual-server:5006
-      - ACTUAL_SYNC_ID=${ACTUAL_SYNC_ID}
-      - ACTUAL_SERVER_PASSWORD=${ACTUAL_SERVER_PASSWORD}
       - CRON_SCHEDULE=0 */4 * * *
       - TZ=Europe/London
     volumes:
@@ -37,23 +32,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 120s
-  
-  truelayer-setup:
-    build: ./actual-truelayer-sync/truelayer-setup
-    container_name: truelayer-setup
+
+  actual-truelayer-setup:
+    image: ghcr.io/koesac/actual-truelayer-setup:latest
+    container_name: actual-truelayer-setup
     ports:
       - "3099:3099"
     environment:
-      - TRUELAYER_CLIENT_ID=${TRUELAYER_CLIENT_ID}
-      - TRUELAYER_CLIENT_SECRET=${TRUELAYER_CLIENT_SECRET}
       - REDIRECT_URI=https://truelayer.alexkoester.com/callback
-      - TRUELAYER_ENV=sandbox
     volumes:
       - ./truelayer-data:/app/data
+      - ./truelayer-setup/server.js:/app/server.js:ro
     networks:
       - finance
     profiles:
       - setup
+
 networks:
   finance:
     driver: bridge
