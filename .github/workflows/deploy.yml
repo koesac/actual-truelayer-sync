@@ -1,1 +1,33 @@
-# Deploy is now handled in publish.yml. This file can be deleted.
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync repo to stable deploy path
+        run: |
+          DEPLOY_DIR=/home/koesac/apps/actual-truelayer-sync
+          mkdir -p "$DEPLOY_DIR"
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            "$GITHUB_WORKSPACE"/ "$DEPLOY_DIR"/
+
+      - name: Pull latest images
+        working-directory: /home/koesac/apps/actual-truelayer-sync
+        run: docker compose pull actual-truelayer-sync actual-truelayer-setup
+
+      - name: Restart containers
+        working-directory: /home/koesac/apps/actual-truelayer-sync
+        run: docker compose up -d actual-truelayer-sync
+
+      - name: Clean up old images
+        run: docker image prune -f
