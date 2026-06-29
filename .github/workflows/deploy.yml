@@ -1,3 +1,1 @@
-# Deploy is now handled in publish.yml as a job that runs after publish.
-# This file is kept as a placeholder to avoid broken references.
-# It can be deleted once confirmed working.
+# Deploy is now handled in publish.yml. This file can be deleted.
