@@ -5,16 +5,12 @@ Self-hosted TrueLayer → Actual Budget setup UI.
 ## Setup
 
 1. Copy `.env.example` to `.env` and fill in your credentials.
-2. Run the setup UI:
+2. On first run, build and start the container:
    ```bash
-   docker compose --profile setup up -d --build
+   docker compose up -d --build
    ```
 3. Open `http://localhost:3099` (or your configured URL).
 4. Connect your bank, map accounts, save.
-5. Tear down the setup UI when done:
-   ```bash
-   docker compose --profile setup down
-   ```
 
 ## Environment Variables
 
@@ -33,4 +29,4 @@ All state is persisted in `./truelayer-data/` (`config.json` and `state.json`).
 
 ## Deploy
 
-Pushing to `main` triggers the self-hosted runner to sync the repo and rebuild the setup image automatically.
+Pushing to `main` triggers the self-hosted runner to sync the repo. If only `server.js` changed, nodemon picks it up automatically with no container restart. A full rebuild only happens when `package.json` or `Dockerfile` changes.
