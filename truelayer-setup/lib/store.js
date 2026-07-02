@@ -4,10 +4,12 @@ const fs   = require('fs');
 const path = require('path');
 
 module.exports = function createStore(options) {
-  const DATA_DIR    = (options && options.DATA_DIR) || '/app/data';
-  const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
-  const STATE_PATH  = path.join(DATA_DIR, 'state.json');
-  const TXN_DIR     = path.join(DATA_DIR, 'transactions');
+  const DATA_DIR         = (options && options.DATA_DIR) || '/app/data';
+  const CONFIG_PATH      = path.join(DATA_DIR, 'config.json');
+  const STATE_PATH       = path.join(DATA_DIR, 'state.json');
+  const TXN_DIR          = path.join(DATA_DIR, 'transactions');
+  const CATEGORY_PATH    = path.join(DATA_DIR, 'categories.json');
+  const OVERRIDES_PATH   = path.join(DATA_DIR, 'category-overrides.json');
 
   // ── Config ────────────────────────────────────────────────────────────────
 
@@ -43,6 +45,42 @@ module.exports = function createStore(options) {
 
   function saveState(st) {
     fs.writeFileSync(STATE_PATH, JSON.stringify(st, null, 2));
+  }
+
+  // ── Custom category rules / overrides ─────────────────────────────────────
+
+  function loadCategoryRules() {
+    if (!fs.existsSync(CATEGORY_PATH)) return [];
+    try {
+      const raw = fs.readFileSync(CATEGORY_PATH, 'utf8').trim();
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.warn('categories.json unreadable:', e.message);
+      return [];
+    }
+  }
+
+  function saveCategoryRules(rules) {
+    fs.writeFileSync(CATEGORY_PATH, JSON.stringify(rules || [], null, 2));
+  }
+
+  function loadCategoryOverrides() {
+    if (!fs.existsSync(OVERRIDES_PATH)) return {};
+    try {
+      const raw = fs.readFileSync(OVERRIDES_PATH, 'utf8').trim();
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) {
+      console.warn('category-overrides.json unreadable:', e.message);
+      return {};
+    }
+  }
+
+  function saveCategoryOverrides(overrides) {
+    fs.writeFileSync(OVERRIDES_PATH, JSON.stringify(overrides || {}, null, 2));
   }
 
   // ── Transaction store ─────────────────────────────────────────────────────
@@ -168,6 +206,10 @@ module.exports = function createStore(options) {
     saveConfig,
     loadState,
     saveState,
+    loadCategoryRules,
+    saveCategoryRules,
+    loadCategoryOverrides,
+    saveCategoryOverrides,
     txnPath,
     loadStoredTxns,
     mergeAndSaveTxns,
